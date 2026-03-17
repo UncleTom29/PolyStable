@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export interface TokenPrice {
   symbol: string;
@@ -18,6 +18,9 @@ export function usePrices(symbols: string[] = ["DOT", "pUSD"]) {
     pUSD: { symbol: "pUSD", usd: 1.0, updatedAt: Date.now() },
   });
   const [isLoading, setIsLoading] = useState(true);
+
+  // Memoize the joined symbols string to avoid spurious re-renders
+  const symbolsKey = useMemo(() => symbols.slice().sort().join(","), [symbols]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const fetchPrices = async () => {
@@ -69,7 +72,7 @@ export function usePrices(symbols: string[] = ["DOT", "pUSD"]) {
     fetchPrices();
     const interval = setInterval(fetchPrices, 60_000);
     return () => clearInterval(interval);
-  }, [symbols.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { prices, isLoading };
 }

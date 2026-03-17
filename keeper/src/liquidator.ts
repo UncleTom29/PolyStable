@@ -104,7 +104,8 @@ export class Liquidator {
         const seizedDOT = vault.lockedAmount as bigint;
         const debtUSD = (Number(debt) / 1e18) * 1; // pUSD = $1
         const seizedUSD = (Number(seizedDOT) / 1e18) * this.dotPriceUSD;
-        const profit = seizedUSD - debtUSD + seizedUSD * this.LIQUIDATION_BONUS;
+        // Profit = bonus portion of seized collateral (5% of seized value)
+        const profit = seizedUSD * this.LIQUIDATION_BONUS;
 
         result.liquidated++;
         result.totalProfitUSD += profit;

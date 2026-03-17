@@ -4,6 +4,9 @@ import { useState } from "react";
 import { parseEther, type Address } from "viem";
 import { useOpenVault } from "@/hooks/useVault";
 
+const MIN_COLLATERAL_RATIO = 1.5;
+const SAFE_MINT_FACTOR = 0.66;
+
 interface OpenVaultModalProps {
   onClose: () => void;
   onSuccess?: (txHash: string) => void;
@@ -24,7 +27,7 @@ export function OpenVaultModal({ onClose, onSuccess }: OpenVaultModalProps) {
 
   const handleSafeMax = () => {
     if (!deposit) return;
-    setMint(((depositNum * DOT_PRICE) / 1.5 * 0.66).toFixed(2));
+    setMint(((depositNum * DOT_PRICE) / MIN_COLLATERAL_RATIO * SAFE_MINT_FACTOR).toFixed(2));
   };
 
   const handleSubmit = async () => {

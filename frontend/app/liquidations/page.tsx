@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAccount, usePublicClient } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { type Address } from "viem";
@@ -25,9 +25,9 @@ const DOT_PRICE = 10; // USD
 
 function getRatioColor(ratio: bigint): string {
   const pct = Number(ratio) / 1e16;
-  if (pct < 150) return "text-red-400 bg-red-950";
   if (pct < 110) return "text-orange-400 bg-orange-950";
   if (pct < 125) return "text-yellow-400 bg-yellow-950";
+  if (pct < 150) return "text-red-400 bg-red-950";
   return "text-gray-300";
 }
 
@@ -80,7 +80,7 @@ export default function LiquidationsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  const fetchVaults = async () => {
+  const fetchVaults = useCallback(async () => {
     if (!publicClient) return;
     setIsLoading(true);
     try {
@@ -149,13 +149,13 @@ export default function LiquidationsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [publicClient]);
 
   useEffect(() => {
     fetchVaults();
     const interval = setInterval(fetchVaults, 15_000);
     return () => clearInterval(interval);
-  }, [publicClient]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchVaults]);
 
   if (!isConnected) {
     return (

@@ -23,19 +23,19 @@ async function main() {
 
   // Target ratios and their corresponding vault params (collateral DOT, mint pUSD)
   // ratio = (locked * price) / debt  =>  debt = (locked * price) / ratio
-  const vaultParams: Array<{ label: string; collateralDOT: bigint; targetRatio: number }> = [
-    { label: "200%", collateralDOT: 20n, targetRatio: 200 },
-    { label: "180%", collateralDOT: 18n, targetRatio: 180 },
-    { label: "155%", collateralDOT: 15n + 5n * 10n ** 17n / 10n ** 17n, targetRatio: 155 },
-    { label: "152%", collateralDOT: 15n + 2n * 10n ** 17n / 10n ** 17n, targetRatio: 152 },
-    { label: "300%", collateralDOT: 30n, targetRatio: 300 },
+  const vaultParams: Array<{ label: string; collateralDOT: string; targetRatio: number }> = [
+    { label: "200%", collateralDOT: "20", targetRatio: 200 },
+    { label: "180%", collateralDOT: "18", targetRatio: 180 },
+    { label: "155%", collateralDOT: "15.5", targetRatio: 155 },
+    { label: "152%", collateralDOT: "15.2", targetRatio: 152 },
+    { label: "300%", collateralDOT: "30", targetRatio: 300 },
   ];
 
   console.log("\nOpening 5 vaults...");
   const vaultIds: bigint[] = [];
 
   for (const { label, collateralDOT, targetRatio } of vaultParams) {
-    const deposit = ethers.parseEther(collateralDOT.toString());
+    const deposit = ethers.parseEther(collateralDOT);
     // debt = deposit * DOT_PRICE * 100 / targetRatio  (in ether units)
     const mintAmount = (deposit * DOT_PRICE * 100n) / BigInt(targetRatio);
 

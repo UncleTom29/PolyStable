@@ -103,6 +103,11 @@ describe("VaultEngine", function () {
 
     it("reverts DebtCeilingExceeded", async function () {
       const { vaultEngine, user1 } = await loadFixture(deployFixture);
+      // Fund user1 with enough native DOT to attempt this large deposit
+      await ethers.provider.send("hardhat_setBalance", [
+        user1.address,
+        "0x" + (BigInt("3000000") * BigInt(10) ** BigInt(18)).toString(16),
+      ]);
       await expect(
         vaultEngine.connect(user1).openVault(
           ethers.ZeroAddress,

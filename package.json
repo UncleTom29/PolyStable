@@ -1,0 +1,19 @@
+{
+  "name": "polystable",
+  "version": "1.0.0",
+  "description": "PolyStable — Cross-Chain CDP Stablecoin on Polkadot Hub",
+  "private": true,
+  "workspaces": [
+    "contracts",
+    "frontend",
+    "keeper"
+  ],
+  "scripts": {
+    "test": "cd contracts && npx hardhat test",
+    "deploy:testnet": "cd contracts && npx hardhat run scripts/deploy.ts --network polkadotHubTestnet",
+    "dev": "cd frontend && npm run dev",
+    "keeper": "cd keeper && npm run start",
+    "lint": "eslint . && cd contracts && npx solhint 'src/**/*.sol'"
+  },
+  "license": "MIT"
+}

@@ -40,6 +40,7 @@ contract SurplusBuffer is ISurplusBuffer, AccessControl, ReentrancyGuard {
     error SurplusBuffer__InsufficientSurplus(uint256 available, uint256 requested);
     error SurplusBuffer__ZeroAmount();
     error SurplusBuffer__ZeroAddress();
+    error SurplusBuffer__TransferFailed();
 
     constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -91,7 +92,7 @@ contract SurplusBuffer is ISurplusBuffer, AccessControl, ReentrancyGuard {
         if (amount > surplusBalance) revert SurplusBuffer__InsufficientSurplus(surplusBalance, amount);
         surplusBalance -= amount;
         (bool ok,) = to.call{value: amount}("");
-        require(ok, "Transfer failed");
+        if (!ok) revert SurplusBuffer__TransferFailed();
         emit SurplusWithdrawn(to, amount);
     }
 

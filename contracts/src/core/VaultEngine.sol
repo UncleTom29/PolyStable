@@ -72,6 +72,8 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
     error VaultEngine__ZeroAmount();
     error VaultEngine__VaultNotFound(uint256 vaultId);
     error VaultEngine__TransferFailed();
+    error VaultEngine__NativeMsgValueMismatch(uint256 sent, uint256 expected);
+    error VaultEngine__VaultHealthy(uint256 ratio, uint256 minRatio);
 
     /// @param _pusd The pUSD token address
     /// @param _oracle The price oracle address
@@ -168,7 +170,7 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
 
         // Handle native DOT vs ERC20
         if (collateral == address(0)) {
-            require(msg.value == deposit, "VaultEngine: DOT amount mismatch");
+            if (msg.value != deposit) revert VaultEngine__NativeMsgValueMismatch(msg.value, deposit);
         } else {
             IERC20(collateral).safeTransferFrom(msg.sender, address(this), deposit);
         }
@@ -255,7 +257,6 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
             uint256 ratio = _getCollateralRatio(vaultId);
             bytes32 key = keccak256(abi.encodePacked(vault.collateral));
             if (ratio < collateralTypes[key].minRatio) {
-                vault.lockedAmount = newLocked + amount; // Revert effect
                 revert VaultEngine__BelowMinRatio(ratio, collateralTypes[key].minRatio);
             }
         }
@@ -301,8 +302,6 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
         // Check ratio
         uint256 ratio = _getCollateralRatio(vaultId);
         if (ratio < ct.minRatio) {
-            vault.debt -= amount;
-            ct.totalDebt -= amount;
             revert VaultEngine__BelowMinRatio(ratio, ct.minRatio);
         }
 
@@ -377,7 +376,7 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
         CollateralType storage ct = collateralTypes[key];
 
         uint256 ratio = _getCollateralRatio(vaultId);
-        require(ratio < ct.minRatio, "VaultEngine: vault is healthy");
+        if (ratio >= ct.minRatio) revert VaultEngine__VaultHealthy(ratio, ct.minRatio);
 
         (uint256 price18,) = oracle.getPrice(vault.collateral);
 
@@ -432,7 +431,7 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
 
         // Send DOT rewards to surplus buffer
         (bool ok,) = address(surplusBuffer).call{value: pending}("");
-        require(ok, "VaultEngine: transfer to surplus failed");
+        if (!ok) revert VaultEngine__TransferFailed();
 
         emit StakingRewardsHarvested(pending);
     }

@@ -1,0 +1,38 @@
+{
+  "name": "@polystable/contracts",
+  "version": "1.0.0",
+  "description": "PolyStable Protocol Smart Contracts",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:testnet": "hardhat run scripts/deploy.ts --network polkadotHubTestnet",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "seed": "hardhat run scripts/seed-testnet.ts --network polkadotHubTestnet",
+    "verify": "hardhat run scripts/verify.ts --network polkadotHubTestnet",
+    "lint": "solhint 'src/**/*.sol'",
+    "coverage": "hardhat coverage"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0",
+    "@chainlink/contracts": "^0.8.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-foundry": "^1.1.1",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "@typechain/hardhat": "^9.0.0",
+    "@typechain/ethers-v6": "^0.5.0",
+    "hardhat": "^2.22.0",
+    "hardhat-gas-reporter": "^1.0.0",
+    "solidity-coverage": "^0.8.0",
+    "solhint": "^4.5.0",
+    "dotenv": "^16.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "chai": "^4.3.0",
+    "ethers": "^6.0.0"
+  }
+}

@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "../precompiles/IStaking.sol";
 import "../interfaces/IVaultEngine.sol";
 import "../interfaces/ISurplusBuffer.sol";
 import "../core/PriceOracle.sol";
@@ -24,8 +23,14 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
     bytes32 public constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
 
     // ─── Constants ────────────────────────────────────────────────────────────
-    /// @dev Staking precompile address
-    IStaking public constant STAKING = IStaking(0x0000000000000000000000000000000000000800);
+    /// @dev Staking precompile address and selectors
+    uint256 internal constant STAKING_PRECOMPILE = 0x800;
+    uint256 internal constant STAKING_BOND_SELECTOR = 0x6dd20151;
+    uint256 internal constant STAKING_BOND_EXTRA_SELECTOR = 0xeaca88de;
+    uint256 internal constant STAKING_UNBOND_SELECTOR = 0x27de9e32;
+    uint256 internal constant STAKING_WITHDRAW_UNBONDED_SELECTOR = 0x548a6706;
+    uint256 internal constant STAKING_CLAIM_REWARDS_SELECTOR = 0x2efe8a5f;
+    uint256 internal constant STAKING_GET_PENDING_REWARDS_SELECTOR = 0xf6ed2017;
 
     /// @dev Ray (27 decimal fixed-point)
     uint256 internal constant RAY = 1e27;
@@ -52,6 +57,9 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
     /// @notice The surplus buffer
     ISurplusBuffer public immutable surplusBuffer;
 
+    /// @notice Whether native DOT deposits should be auto-staked via the staking precompile
+    bool public nativeAutoStakingEnabled = true;
+
     // ─── Events ───────────────────────────────────────────────────────────────
     event VaultOpened(uint256 indexed vaultId, address indexed owner, address indexed collateral, uint256 deposit, uint256 minted);
     event CollateralDeposited(uint256 indexed vaultId, uint256 amount);
@@ -62,6 +70,7 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
     event StakingRewardsHarvested(uint256 amount);
     event CollateralAdded(address indexed collateral, uint256 minRatio, uint256 debtCeiling);
     event CollateralUpdated(address indexed collateral);
+    event NativeAutoStakingUpdated(bool enabled);
     event VaultLiquidated(uint256 indexed vaultId, address indexed liquidator, uint256 seized, uint256 debt);
 
     // ─── Custom Errors ────────────────────────────────────────────────────────
@@ -140,6 +149,12 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
         emit CollateralUpdated(token);
     }
 
+    /// @notice Enable or disable best-effort native DOT auto-staking hooks
+    function setNativeAutoStakingEnabled(bool enabled) external onlyRole(COLLATERAL_ADMIN_ROLE) {
+        nativeAutoStakingEnabled = enabled;
+        emit NativeAutoStakingUpdated(enabled);
+    }
+
     /// @notice Pause the vault engine
     function pause() external onlyRole(GUARDIAN_ROLE) {
         _pause();
@@ -202,7 +217,7 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
 
         // Auto-stake DOT via staking precompile
         if (collateral == address(0)) {
-            try STAKING.bond(address(this), deposit, abi.encodePacked(uint8(0))) {} catch {}
+            _bondNativeCollateral(deposit);
         }
 
         emit VaultOpened(vaultId, msg.sender, collateral, deposit, mintAmount);
@@ -230,7 +245,7 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
 
         // Re-stake if DOT
         if (vault.collateral == address(0)) {
-            try STAKING.bondExtra(depositAmount) {} catch {}
+            _callStakingUint256(STAKING_BOND_EXTRA_SELECTOR, depositAmount);
         }
 
         emit CollateralDeposited(vaultId, depositAmount);
@@ -263,8 +278,8 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
 
         // Interactions
         if (vault.collateral == address(0)) {
-            try STAKING.unbond(amount) {} catch {}
-            try STAKING.withdrawUnbonded(0) {} catch {}
+            _callStakingUint256(STAKING_UNBOND_SELECTOR, amount);
+            _callStakingUint32(STAKING_WITHDRAW_UNBONDED_SELECTOR, uint32(0));
             (bool ok,) = msg.sender.call{value: amount}("");
             if (!ok) revert VaultEngine__TransferFailed();
         } else {
@@ -380,17 +395,12 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
 
         (uint256 price18,) = oracle.getPrice(vault.collateral);
 
-        uint256 debtValue = vault.debt;
-        uint256 seizeValue = (debtValue * (1e18 + ct.liquidationBonus)) / 1e18;
-        seized = (seizeValue * 1e18) / price18;
-        if (seized > vault.lockedAmount) seized = vault.lockedAmount;
-
-        bonus = seized - (debtValue * 1e18 / price18);
-
         uint256 debtToClear = vault.debt;
-        address owner = vault.owner;
-        address collateral = vault.collateral;
         uint256 lockedAmount = vault.lockedAmount;
+        seized = (debtToClear * (1e18 + ct.liquidationBonus)) / price18;
+        if (seized > lockedAmount) seized = lockedAmount;
+
+        bonus = seized - (debtToClear * 1e18 / price18);
 
         // Effects
         ct.totalDebt -= debtToClear;
@@ -405,29 +415,19 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
         pusd.burn(liquidator, debtToClear);
 
         // Transfer seized collateral to liquidator
-        if (collateral == address(0)) {
-            (bool ok,) = liquidator.call{value: seized}("");
-            if (!ok) revert VaultEngine__TransferFailed();
-            if (remainder > 0) {
-                (bool ok2,) = owner.call{value: remainder}("");
-                if (!ok2) revert VaultEngine__TransferFailed();
-            }
-        } else {
-            IERC20(collateral).safeTransfer(liquidator, seized);
-            if (remainder > 0) {
-                IERC20(collateral).safeTransfer(owner, remainder);
-            }
-        }
+        _transferLiquidationCollateral(vault.collateral, liquidator, vault.owner, seized, remainder);
 
         emit VaultLiquidated(vaultId, liquidator, seized, debtToClear);
     }
 
     /// @notice Harvest staking rewards and send to surplus buffer
     function harvestStakingRewards() external override {
-        uint256 pending = STAKING.getPendingRewards(address(this));
+        uint256 pending = _getPendingStakingRewards();
         if (pending == 0) return;
 
-        STAKING.claimRewards(address(this), 0);
+        if (!_callStakingAddressUint32(STAKING_CLAIM_REWARDS_SELECTOR, address(this), uint32(0))) {
+            return;
+        }
 
         // Send DOT rewards to surplus buffer
         (bool ok,) = address(surplusBuffer).call{value: pending}("");
@@ -485,6 +485,96 @@ contract VaultEngine is IVaultEngine, Pausable, AccessControl, ReentrancyGuard {
         if (price18 == 0) return type(uint256).max;
 
         return (vault.lockedAmount * price18) / vault.debt;
+    }
+
+    /// @dev Build the `bond(address,uint256,bytes)` calldata manually to avoid MCOPY on the native path.
+    function _bondNativeCollateral(uint256 amount) internal returns (bool ok) {
+        if (!nativeAutoStakingEnabled) return false;
+
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, shl(224, STAKING_BOND_SELECTOR))
+            mstore(add(ptr, 0x04), address())
+            mstore(add(ptr, 0x24), amount)
+            mstore(add(ptr, 0x44), 0x60)
+            mstore(add(ptr, 0x64), 0x01)
+            mstore(add(ptr, 0x84), 0x00)
+            ok := call(gas(), STAKING_PRECOMPILE, 0, ptr, 0xa4, 0, 0)
+        }
+    }
+
+    function _callStakingUint256(uint256 selector, uint256 value) internal returns (bool ok) {
+        if (!nativeAutoStakingEnabled) return false;
+
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, shl(224, selector))
+            mstore(add(ptr, 0x04), value)
+            ok := call(gas(), STAKING_PRECOMPILE, 0, ptr, 0x24, 0, 0)
+        }
+    }
+
+    function _callStakingUint32(uint256 selector, uint32 value) internal returns (bool ok) {
+        if (!nativeAutoStakingEnabled) return false;
+
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, shl(224, selector))
+            mstore(add(ptr, 0x04), value)
+            ok := call(gas(), STAKING_PRECOMPILE, 0, ptr, 0x24, 0, 0)
+        }
+    }
+
+    function _callStakingAddressUint32(uint256 selector, address account, uint32 value) internal returns (bool ok) {
+        if (!nativeAutoStakingEnabled) return false;
+
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, shl(224, selector))
+            mstore(add(ptr, 0x04), account)
+            mstore(add(ptr, 0x24), value)
+            ok := call(gas(), STAKING_PRECOMPILE, 0, ptr, 0x44, 0, 0)
+        }
+    }
+
+    /// @dev Read pending rewards defensively because some environments expose an incompatible staking precompile.
+    function _getPendingStakingRewards() internal view returns (uint256 pending) {
+        if (!nativeAutoStakingEnabled) return 0;
+
+        bool ok;
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, shl(224, STAKING_GET_PENDING_REWARDS_SELECTOR))
+            mstore(add(ptr, 0x04), address())
+            mstore(add(ptr, 0x24), 0x00)
+            ok := staticcall(gas(), STAKING_PRECOMPILE, ptr, 0x24, add(ptr, 0x24), 0x20)
+            if and(ok, eq(returndatasize(), 0x20)) {
+                pending := mload(add(ptr, 0x24))
+            }
+        }
+    }
+
+    function _transferLiquidationCollateral(
+        address collateral,
+        address liquidator,
+        address owner,
+        uint256 seized,
+        uint256 remainder
+    ) internal {
+        if (collateral == address(0)) {
+            (bool ok,) = liquidator.call{value: seized}("");
+            if (!ok) revert VaultEngine__TransferFailed();
+            if (remainder > 0) {
+                (bool ok2,) = owner.call{value: remainder}("");
+                if (!ok2) revert VaultEngine__TransferFailed();
+            }
+            return;
+        }
+
+        IERC20(collateral).safeTransfer(liquidator, seized);
+        if (remainder > 0) {
+            IERC20(collateral).safeTransfer(owner, remainder);
+        }
     }
 
     receive() external payable {}

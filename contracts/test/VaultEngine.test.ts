@@ -75,6 +75,23 @@ describe("VaultEngine", function () {
       expect(await pusd.balanceOf(user1.address)).to.equal(ethers.parseEther("90"));
     });
 
+    it("can disable native auto-staking without blocking native vault opens", async function () {
+      const { vaultEngine, user1, pusd } = await loadFixture(deployFixture);
+      const staking = await ethers.getContractAt("MockStaking", STAKING_PRECOMPILE);
+
+      await vaultEngine.setNativeAutoStakingEnabled(false);
+      await vaultEngine.connect(user1).openVault(
+        ethers.ZeroAddress,
+        ethers.parseEther("15"),
+        ethers.parseEther("90"),
+        { value: ethers.parseEther("15") }
+      );
+
+      expect(await staking.stakedBalances(await vaultEngine.getAddress())).to.equal(0);
+      expect(await ethers.provider.getBalance(await vaultEngine.getAddress())).to.equal(ethers.parseEther("15"));
+      expect(await pusd.balanceOf(user1.address)).to.equal(ethers.parseEther("90"));
+    });
+
     it("opens with ERC20 collateral", async function () {
       const { vaultEngine, user1, pusd, mockToken } = await loadFixture(deployFixture);
       await mockToken.mint(user1.address, ethers.parseEther("10"));

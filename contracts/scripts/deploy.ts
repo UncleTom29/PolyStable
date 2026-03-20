@@ -4,6 +4,7 @@ import * as path from "path";
 
 async function main() {
   const [deployer] = await ethers.getSigners();
+  const network = await ethers.provider.getNetwork();
   console.log("Deploying contracts with:", deployer.address);
   console.log("Balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "DOT");
 
@@ -90,6 +91,7 @@ async function main() {
   const BURNER_ROLE = await pusd.BURNER_ROLE();
   const LIQUIDATOR_ROLE = await vaultEngine.LIQUIDATOR_ROLE();
   const PROPOSER_ROLE = await timelock.PROPOSER_ROLE();
+  const CANCELLER_ROLE = await timelock.CANCELLER_ROLE();
   const EXECUTOR_ROLE = await timelock.EXECUTOR_ROLE();
   const TIMELOCK_ADMIN_ROLE = await timelock.DEFAULT_ADMIN_ROLE();
 
@@ -110,6 +112,9 @@ async function main() {
 
   await (await timelock.grantRole(PROPOSER_ROLE, governorAddress)).wait();
   console.log("  Timelock: granted PROPOSER_ROLE to Governor");
+
+  await (await timelock.grantRole(CANCELLER_ROLE, governorAddress)).wait();
+  console.log("  Timelock: granted CANCELLER_ROLE to Governor");
 
   await (await timelock.grantRole(EXECUTOR_ROLE, xcmExecutorAddress)).wait();
   console.log("  Timelock: granted EXECUTOR_ROLE to XCMExecutor");
@@ -142,7 +147,6 @@ async function main() {
   console.log("  pGOV delegated from deployer to deployer");
 
   // ─── Save deployment addresses ─────────────────────────────────────────────
-  const network = await ethers.provider.getNetwork();
   const networkName = network.name === "unknown" ? `chain-${network.chainId}` : network.name;
   const deployments = {
     network: networkName,

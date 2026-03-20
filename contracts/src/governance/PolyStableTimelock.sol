@@ -22,7 +22,7 @@ contract PolyStableTimelock is TimelockController {
             minDelay,
             proposers,
             executors,
-            address(0) // self-administered, admin revoked
+            msg.sender // temporary admin; deploy script revokes after wiring roles
         )
     {}
 

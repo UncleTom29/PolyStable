@@ -8,10 +8,10 @@ async function main() {
     throw new Error("Deployment file not found. Run deploy.ts first.");
   }
 
-  const { contracts } = JSON.parse(fs.readFileSync(deploymentsPath, "utf8"));
+  const { contracts, deployer } = JSON.parse(fs.readFileSync(deploymentsPath, "utf8"));
 
   const contractsToVerify = [
-    { name: "PGOV", constructorArguments: [process.env.DEPLOYER_ADDRESS ?? ""] },
+    { name: "PGOV", constructorArguments: [deployer] },
     { name: "PUSD", constructorArguments: [] },
     { name: "PriceOracle", constructorArguments: [] },
     { name: "SurplusBuffer", constructorArguments: [] },

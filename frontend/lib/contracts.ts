@@ -3,6 +3,67 @@ import { type Address } from "viem";
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 export const VAULT_ENGINE_ABI = [
+  // Errors
+  {
+    inputs: [
+      { name: "ratio", type: "uint256" },
+      { name: "minRatio", type: "uint256" },
+    ],
+    name: "VaultEngine__BelowMinRatio",
+    type: "error",
+  },
+  {
+    inputs: [
+      { name: "req", type: "uint256" },
+      { name: "ceiling", type: "uint256" },
+    ],
+    name: "VaultEngine__DebtCeilingExceeded",
+    type: "error",
+  },
+  {
+    inputs: [
+      { name: "vaultId", type: "uint256" },
+      { name: "caller", type: "address" },
+    ],
+    name: "VaultEngine__NotVaultOwner",
+    type: "error",
+  },
+  {
+    inputs: [{ name: "collateral", type: "address" }],
+    name: "VaultEngine__CollateralNotActive",
+    type: "error",
+  },
+  {
+    inputs: [],
+    name: "VaultEngine__ZeroAmount",
+    type: "error",
+  },
+  {
+    inputs: [{ name: "vaultId", type: "uint256" }],
+    name: "VaultEngine__VaultNotFound",
+    type: "error",
+  },
+  {
+    inputs: [],
+    name: "VaultEngine__TransferFailed",
+    type: "error",
+  },
+  {
+    inputs: [
+      { name: "sent", type: "uint256" },
+      { name: "expected", type: "uint256" },
+    ],
+    name: "VaultEngine__NativeMsgValueMismatch",
+    type: "error",
+  },
+  {
+    inputs: [
+      { name: "ratio", type: "uint256" },
+      { name: "minRatio", type: "uint256" },
+    ],
+    name: "VaultEngine__VaultHealthy",
+    type: "error",
+  },
   // Read
   {
     inputs: [{ name: "vaultId", type: "uint256" }],
@@ -111,10 +172,24 @@ export const VAULT_ENGINE_ABI = [
     type: "function",
   },
   {
+    inputs: [{ name: "enabled", type: "bool" }],
+    name: "setNativeAutoStakingEnabled",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
     inputs: [],
     name: "harvestStakingRewards",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "nativeAutoStakingEnabled",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
     type: "function",
   },
   // Events
@@ -332,7 +407,7 @@ export const LIQUIDATION_ENGINE_ABI = [
 ] as const;
 
 // ─── Contract addresses (loaded from deployments) ─────────────────────────────
-let _addresses: Record<string, Address> = {
+const _addresses: Record<string, Address> = {
   VaultEngine: "0x0000000000000000000000000000000000000000",
   PUSD: "0x0000000000000000000000000000000000000000",
   PGOV: "0x0000000000000000000000000000000000000000",

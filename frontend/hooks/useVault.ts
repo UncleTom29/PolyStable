@@ -2,13 +2,15 @@
 
 import { useReadContract, useWriteContract, usePublicClient } from "wagmi";
 import { useCallback, useEffect, useState } from "react";
-import { type Address, parseEventLogs } from "viem";
+import { type Address, type AbiEvent, parseEventLogs } from "viem";
 import {
   vaultEngineConfig,
   pusdConfig,
   VAULT_ENGINE_ABI,
   CONTRACT_ADDRESSES,
 } from "@/lib/contracts";
+import { MIN_COLLATERAL_RATIO, SAFE_COLLATERAL_RATIO } from "@/lib/constants";
+import { formatContractWriteError } from "@/lib/utils";
 
 export interface VaultData {
   id: bigint;
@@ -35,9 +37,9 @@ export function useVault(vaultId: bigint) {
   });
 
   const status: "safe" | "warning" | "danger" = ratio
-    ? Number(ratio) / 1e16 >= 175
+    ? Number(ratio) / 1e16 >= SAFE_COLLATERAL_RATIO
       ? "safe"
-      : Number(ratio) / 1e16 >= 150
+      : Number(ratio) / 1e16 >= MIN_COLLATERAL_RATIO
       ? "warning"
       : "danger"
     : "safe";
@@ -63,7 +65,7 @@ export function useUserVaults(userAddress: Address | undefined) {
       try {
         const logs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.VaultEngine,
-          event: VAULT_ENGINE_ABI.find((x) => x.type === "event" && x.name === "VaultOpened") as Parameters<typeof publicClient.getLogs>[0]["event"],
+          event: VAULT_ENGINE_ABI.find((x) => x.type === "event" && x.name === "VaultOpened") as AbiEvent,
           args: { owner: userAddress },
           fromBlock: 0n,
           toBlock: "latest",
@@ -91,7 +93,8 @@ export function useUserVaults(userAddress: Address | undefined) {
 }
 
 export function useOpenVault() {
-  const { writeContractAsync, isPending, error } = useWriteContract();
+  const { writeContractAsync, isPending } = useWriteContract();
+  const [error, setError] = useState<Error | null>(null);
 
   const openVault = useCallback(
     async (
@@ -100,12 +103,24 @@ export function useOpenVault() {
       mintAmount: bigint,
       isNative: boolean
     ) => {
-      return writeContractAsync({
-        ...vaultEngineConfig,
-        functionName: "openVault",
-        args: [collateral, deposit, mintAmount],
-        value: isNative ? deposit : 0n,
-      });
+      setError(null);
+      try {
+        return await writeContractAsync({
+          ...vaultEngineConfig,
+          functionName: "openVault",
+          args: [collateral, deposit, mintAmount],
+          value: isNative ? deposit : 0n,
+        });
+      } catch (err) {
+        const formatted = new Error(
+          formatContractWriteError(err, {
+            fallbackMessage: "Failed to open vault.",
+            isNativeVaultAction: isNative,
+          })
+        );
+        setError(formatted);
+        throw formatted;
+      }
     },
     [writeContractAsync]
   );

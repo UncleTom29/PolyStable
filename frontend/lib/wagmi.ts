@@ -1,14 +1,14 @@
 import { defineChain } from "viem";
-import { createConfig, http } from "wagmi";
+import { http } from "wagmi";
 import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 
 export const polkadotHubTestnet = defineChain({
-  id: 420420421,
+  id: 420420417,
   name: "Polkadot Hub Testnet",
   nativeCurrency: { name: "DOT", symbol: "DOT", decimals: 18 },
   rpcUrls: {
     default: {
-      http: ["https://testnet-passet-hub-eth-rpc.polkadot.io"],
+      http: ["https://services.polkadothub-rpc.com/testnet"],
     },
   },
   blockExplorers: {
@@ -26,7 +26,7 @@ export const wagmiConfig = getDefaultConfig({
   chains: [polkadotHubTestnet],
   transports: {
     [polkadotHubTestnet.id]: http(
-      "https://testnet-passet-hub-eth-rpc.polkadot.io"
+      "https://services.polkadothub-rpc.com/testnet"
     ),
   },
   ssr: true,

@@ -2,7 +2,7 @@
 
 import { useReadContract, useWriteContract, usePublicClient } from "wagmi";
 import { useCallback, useEffect, useState } from "react";
-import { type Address, keccak256, toHex, encodeFunctionData } from "viem";
+import { type Address, type AbiEvent, keccak256, toHex, encodeFunctionData } from "viem";
 import {
   governorConfig,
   pgovConfig,
@@ -49,7 +49,7 @@ export function useProposals() {
           address: CONTRACT_ADDRESSES.PolyStableGovernor,
           event: GOVERNOR_ABI.find(
             (x) => x.type === "event" && x.name === "ProposalCreated"
-          ) as Parameters<typeof publicClient.getLogs>[0]["event"],
+          ) as AbiEvent,
           fromBlock: 0n,
           toBlock: "latest",
         });

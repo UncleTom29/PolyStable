@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { StatusPill } from "@/components/shared/AppShell";
 import { VaultHealthBar } from "./VaultHealthBar";
+import { formatTokenAmount, formatRatio } from "@/lib/utils";
+import { MIN_COLLATERAL_RATIO, SAFE_COLLATERAL_RATIO } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
 interface VaultCardProps {
   vaultId: bigint;
@@ -12,47 +16,56 @@ interface VaultCardProps {
 }
 
 export function VaultCard({ vaultId, lockedAmount, debt, ratio, collateral }: VaultCardProps) {
-  const ratioPct = Number(ratio) / 1e16;
-  const status =
-    ratioPct >= 175 ? "safe" : ratioPct >= 150 ? "warning" : "danger";
-
-  const statusColors = {
-    safe: "bg-green-900 text-green-400",
-    warning: "bg-yellow-900 text-yellow-400",
-    danger: "bg-red-900 text-red-400",
-  };
-
-  function fmt(val: bigint): string {
-    return (Number(val) / 1e18).toFixed(4);
-  }
+  const ratioPct  = Number(ratio) / 1e16;
+  const status    = ratioPct >= SAFE_COLLATERAL_RATIO ? "safe" : ratioPct >= MIN_COLLATERAL_RATIO ? "warning" : "danger";
+  const tone      = status === "safe" ? "success" : status === "warning" ? "warning" : "danger";
+  const collLabel = collateral === "0x0000000000000000000000000000000000000000" ? "DOT" : "ERC20";
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-gray-700 transition-colors">
-      <div className="flex justify-between items-start mb-3">
-        <span className="text-gray-400 text-sm">Vault #{vaultId.toString()}</span>
-        <span className={`text-xs px-2 py-1 rounded-full ${statusColors[status]}`}>
-          {status.toUpperCase()}
-        </span>
+    <div className={cn(
+      "card rounded-card2 p-5 flex flex-col gap-5 transition-all hover:border-[rgba(255,255,255,0.12)]",
+      status === "danger" && "border-rose/20"
+    )}>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-data text-dim tracking-widest uppercase mb-1">
+            Vault #{vaultId.toString()}
+          </p>
+          <p className="font-display font-bold text-ink text-lg">
+            {formatTokenAmount(lockedAmount)} {collLabel}
+          </p>
+        </div>
+        <StatusPill tone={tone} dot>
+          {status}
+        </StatusPill>
       </div>
 
-      <div className="mb-4">
-        <div className="flex justify-between text-sm mb-1">
-          <span className="text-gray-500">Collateral</span>
-          <span>{fmt(lockedAmount)} {collateral === "0x0000000000000000000000000000000000000000" ? "DOT" : "ERC20"}</span>
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="card-ghost rounded-xl p-3">
+          <p className="text-[11px] font-data text-dim tracking-wider uppercase mb-1.5">Debt</p>
+          <p className="font-data font-semibold text-ink text-sm">
+            {formatTokenAmount(debt)} <span className="text-muted">pUSD</span>
+          </p>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Debt</span>
-          <span>{fmt(debt)} pUSD</span>
+        <div className="card-ghost rounded-xl p-3">
+          <p className="text-[11px] font-data text-dim tracking-wider uppercase mb-1.5">Ratio</p>
+          <p className={cn(
+            "font-data font-semibold text-sm",
+            status === "safe" ? "text-emerald" : status === "warning" ? "text-amber" : "text-rose"
+          )}>
+            {formatRatio(ratio)}
+          </p>
         </div>
       </div>
 
-      <VaultHealthBar ratio={ratio} />
+      {/* Health bar */}
+      <VaultHealthBar ratio={ratio} showLabels={false} />
 
-      <Link
-        href={`/vaults/${vaultId}`}
-        className="mt-4 block text-center text-sm text-pink-500 hover:text-pink-400 transition-colors"
-      >
-        Manage →
+      {/* Action */}
+      <Link href={`/vaults/${vaultId}`} className="btn btn-secondary w-full">
+        Manage Vault
       </Link>
     </div>
   );

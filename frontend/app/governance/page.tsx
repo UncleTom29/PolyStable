@@ -1,164 +1,187 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount } from "wagmi";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useProposals, useVote, useDelegate, useCreateProposal, ProposalState } from "@/hooks/useGovernance";
+import { useAccount, useReadContracts } from "wagmi";
 import { type Address } from "viem";
-
-const PROPOSAL_STATE_LABELS: Record<number, string> = {
-  [ProposalState.Pending]: "Pending",
-  [ProposalState.Active]: "Active",
-  [ProposalState.Canceled]: "Canceled",
-  [ProposalState.Defeated]: "Defeated",
-  [ProposalState.Succeeded]: "Succeeded",
-  [ProposalState.Queued]: "Queued",
-  [ProposalState.Expired]: "Expired",
-  [ProposalState.Executed]: "Executed",
-};
-
-const PROPOSAL_STATE_COLORS: Record<number, string> = {
-  [ProposalState.Pending]: "bg-gray-700 text-gray-300",
-  [ProposalState.Active]: "bg-green-900 text-green-300",
-  [ProposalState.Canceled]: "bg-gray-700 text-gray-500",
-  [ProposalState.Defeated]: "bg-red-900 text-red-300",
-  [ProposalState.Succeeded]: "bg-blue-900 text-blue-300",
-  [ProposalState.Queued]: "bg-yellow-900 text-yellow-300",
-  [ProposalState.Expired]: "bg-gray-700 text-gray-500",
-  [ProposalState.Executed]: "bg-purple-900 text-purple-300",
-};
-
-function ProposalCard({ proposal }: { proposal: ReturnType<typeof useProposals>["proposals"][0] }) {
-  const [showVoteModal, setShowVoteModal] = useState(false);
-  const { castVote, isLoading: voteLoading } = useVote(proposal.id);
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-      <div className="flex justify-between items-start mb-3">
-        <h3 className="font-semibold text-sm text-gray-300 max-w-xs">{proposal.description}</h3>
-        <span className={`text-xs px-2 py-1 rounded-full ${PROPOSAL_STATE_COLORS[proposal.state] ?? "bg-gray-700 text-gray-400"}`}>
-          {PROPOSAL_STATE_LABELS[proposal.state] ?? "Unknown"}
-        </span>
-      </div>
-      <p className="text-xs text-gray-500 mb-4 font-mono">
-        Proposer: {proposal.proposer.slice(0, 8)}…{proposal.proposer.slice(-6)}
-      </p>
-
-      {proposal.state === ProposalState.Active && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => castVote(1)}
-            disabled={voteLoading}
-            className="flex-1 bg-green-900 hover:bg-green-800 text-green-300 text-sm py-2 rounded-lg transition-colors disabled:opacity-50"
-          >
-            For
-          </button>
-          <button
-            onClick={() => castVote(0)}
-            disabled={voteLoading}
-            className="flex-1 bg-red-900 hover:bg-red-800 text-red-300 text-sm py-2 rounded-lg transition-colors disabled:opacity-50"
-          >
-            Against
-          </button>
-          <button
-            onClick={() => castVote(2)}
-            disabled={voteLoading}
-            className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm py-2 rounded-lg transition-colors disabled:opacity-50"
-          >
-            Abstain
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+import {
+  AppShell,
+  EmptyState,
+  LoadingRows,
+  MetricCard,
+  SectionCard,
+  StatusPill,
+  WalletGate,
+} from "@/components/shared/AppShell";
+import { Callout } from "@/components/shared/Callout";
+import { FormField } from "@/components/shared/FormField";
+import { ProposalCard } from "@/components/governance/ProposalCard";
+import {
+  ProposalState,
+  useCreateProposal,
+  useDelegate,
+  useDelegatee,
+  useProposals,
+  useVotingPower,
+} from "@/hooks/useGovernance";
+import { governorConfig } from "@/lib/contracts";
+import { formatAddress, formatTokenAmount } from "@/lib/utils";
 
 export default function GovernancePage() {
   const { address, isConnected } = useAccount();
-  const { proposals, isLoading } = useProposals();
-  const { delegate, isLoading: delegateLoading } = useDelegate();
-  const { createDebtCeilingProposal, isLoading: proposalLoading } = useCreateProposal();
+  const { proposals, isLoading }          = useProposals();
+  const { delegate, isLoading: delegateLoading, error: delegateError } = useDelegate();
+  const { createDebtCeilingProposal, isLoading: proposalLoading, error: proposalError } = useCreateProposal();
+  const { data: votingPower }   = useVotingPower(address);
+  const { data: currentDelegatee } = useDelegatee(address);
   const [delegatee, setDelegatee] = useState("");
   const [newCeiling, setNewCeiling] = useState("20000000");
 
+  const { data: proposalStates } = useReadContracts({
+    contracts: proposals.map((p) => ({ ...governorConfig, functionName: "state", args: [p.id] })),
+    query: { enabled: proposals.length > 0 },
+  });
+
   if (!isConnected) {
     return (
-      <main className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-6">
-        <h1 className="text-3xl font-bold">Connect your wallet</h1>
-        <ConnectButton />
-      </main>
+      <AppShell title="Governance" subtitle="Delegate voting power, draft proposals, and track live decisions." eyebrow="pGOV">
+        <WalletGate
+          title="Connect to participate"
+          description="Wallet connection lets you delegate voting power, propose parameter changes, and cast votes."
+          note="Governance actions"
+        />
+      </AppShell>
     );
   }
 
+  const activeCount = (proposalStates ?? proposals.map((p) => ({ result: p.state })))
+    .filter((r) => Number(r.result) === ProposalState.Active)
+    .length;
+
+  const handleDelegate   = async () => delegate((delegatee || address) as Address);
+  const handleProposal   = async () => {
+    if (!newCeiling) return;
+    await createDebtCeilingProposal(BigInt(newCeiling) * 10n ** 18n);
+  };
+
+  const delegateeDisplay =
+    currentDelegatee && currentDelegatee !== "0x0000000000000000000000000000000000000000"
+      ? formatAddress(currentDelegatee)
+      : "Self";
+
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
-      <nav className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <a href="/" className="text-xl font-bold text-pink-500">PolyStable</a>
-        <ConnectButton />
-      </nav>
+    <AppShell
+      title="Governance"
+      subtitle="Delegate, propose, and vote on protocol parameter changes."
+      eyebrow="pGOV control room"
+    >
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <MetricCard label="Voting power"   value={formatTokenAmount((votingPower as bigint | undefined) ?? 0n)} hint="Delegated to you"           accent="brand"  />
+        <MetricCard label="Delegated to"   value={delegateeDisplay}                                              hint="Current vote target"         accent="teal"   />
+        <MetricCard label="Total proposals" value={isLoading ? "…" : proposals.length.toLocaleString()}          hint="On-chain proposals observed" accent="amber"  />
+        <MetricCard label="Active now"     value={isLoading ? "…" : activeCount.toLocaleString()}               hint="Requires voter attention"    accent="green"  />
+      </div>
 
-      <div className="max-w-4xl mx-auto px-6 py-10">
-        <h1 className="text-3xl font-bold mb-8">Governance</h1>
+      {/* Controls */}
+      <div className="grid gap-5 lg:grid-cols-2 mb-8">
+        {/* Delegate */}
+        <SectionCard title="Delegate voting power" description="Enter an address or leave blank to self-delegate with this wallet.">
+          <div className="space-y-4">
+            <FormField label="Delegatee address" htmlFor="delegatee" hint="Leave blank to delegate to yourself">
+              <input
+                id="delegatee"
+                type="text"
+                value={delegatee}
+                onChange={(e) => setDelegatee(e.target.value)}
+                placeholder={address ?? "0x…"}
+                className="input input-mono"
+              />
+            </FormField>
 
-        {/* Delegation */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8">
-          <h2 className="text-lg font-semibold mb-4">Delegate Voting Power</h2>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={delegatee}
-              onChange={(e) => setDelegatee(e.target.value)}
-              placeholder={address ?? "0x..."}
-              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-pink-500 font-mono"
-            />
-            <button
-              onClick={() => delegate((delegatee || address) as Address)}
-              disabled={delegateLoading}
-              className="bg-pink-600 hover:bg-pink-500 disabled:opacity-50 text-white px-5 py-3 rounded-lg text-sm font-medium transition-colors"
-            >
-              {delegateLoading ? "Delegating…" : "Delegate"}
-            </button>
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                onClick={handleDelegate}
+                disabled={delegateLoading}
+                className="btn btn-primary w-full sm:w-auto"
+              >
+                {delegateLoading ? "Delegating…" : "Delegate"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDelegatee(address ?? "")}
+                className="btn btn-secondary w-full sm:w-auto"
+              >
+                Use My Address
+              </button>
+            </div>
+
+            {delegateError && <Callout tone="error">{delegateError.message}</Callout>}
           </div>
-        </div>
+        </SectionCard>
 
-        {/* Create Proposal */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8">
-          <h2 className="text-lg font-semibold mb-4">Create Proposal: Update DOT Debt Ceiling</h2>
-          <div className="flex gap-3">
-            <input
-              type="number"
-              value={newCeiling}
-              onChange={(e) => setNewCeiling(e.target.value)}
-              placeholder="20000000"
-              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-pink-500"
-            />
-            <span className="flex items-center text-gray-400 text-sm">pUSD</span>
+        {/* Create proposal */}
+        <SectionCard title="Create debt ceiling proposal" description="Submit a governance action to update the DOT collateral debt ceiling.">
+          <div className="space-y-4">
+            <FormField label="New DOT debt ceiling" htmlFor="new-ceiling" hint="Denomination in whole pUSD units">
+              <div className="relative">
+                <input
+                  id="new-ceiling"
+                  type="number"
+                  value={newCeiling}
+                  onChange={(e) => setNewCeiling(e.target.value)}
+                  placeholder="20000000"
+                  className="input pr-16"
+                />
+                <span className="absolute inset-y-0 right-4 flex items-center text-sm font-data font-semibold text-muted pointer-events-none">
+                  pUSD
+                </span>
+              </div>
+            </FormField>
+
+            <Callout tone="info">
+              Submits a governance call to update the DOT collateral debt ceiling. The narrow scope makes proposals easier to review and ratify.
+            </Callout>
+
             <button
-              onClick={() => createDebtCeilingProposal(BigInt(newCeiling) * 10n ** 18n)}
-              disabled={proposalLoading}
-              className="bg-pink-600 hover:bg-pink-500 disabled:opacity-50 text-white px-5 py-3 rounded-lg text-sm font-medium transition-colors"
+              type="button"
+              onClick={handleProposal}
+              disabled={proposalLoading || !newCeiling}
+              className="btn btn-primary"
             >
-              {proposalLoading ? "Proposing…" : "Propose"}
+              {proposalLoading ? "Submitting…" : "Create Proposal"}
             </button>
-          </div>
-        </div>
 
-        {/* Proposals */}
-        <h2 className="text-xl font-semibold mb-4">Active Proposals</h2>
+            {proposalError && <Callout tone="error">{proposalError.message}</Callout>}
+          </div>
+        </SectionCard>
+      </div>
+
+      {/* Proposal feed */}
+      <SectionCard
+        title="Proposal feed"
+        description="All on-chain proposals with live status and voting controls."
+        action={
+          <StatusPill tone="info" dot>
+            {isLoading ? "syncing" : `${proposals.length} loaded`}
+          </StatusPill>
+        }
+      >
         {isLoading ? (
-          <div className="text-gray-400">Loading proposals…</div>
+          <LoadingRows count={2} />
         ) : proposals.length === 0 ? (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-400">
-            No proposals yet
-          </div>
+          <EmptyState
+            title="No proposals yet"
+            description="As governance proposals appear on-chain, they'll show up here with status and voting controls."
+          />
         ) : (
           <div className="space-y-4">
-            {proposals.map((p) => (
-              <ProposalCard key={p.id.toString()} proposal={p} />
+            {proposals.map((proposal) => (
+              <ProposalCard key={proposal.id.toString()} proposal={proposal} />
             ))}
           </div>
         )}
-      </div>
-    </main>
+      </SectionCard>
+    </AppShell>
   );
 }

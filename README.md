@@ -2,7 +2,7 @@
 
 ## Overview
 
-PolyStable is a MakerDAO-inspired Collateralized Debt Position (CDP) protocol built exclusively for Polkadot Hub. Users lock DOT or XCM parachain tokens as collateral to mint **pUSD**, a fully on-chain USD-pegged stablecoin. Unlike traditional CDP designs, PolyStable leverages Polkadot-native primitives — including the staking precompile, XCM execution, and parachain composability — to create a stablecoin system that earns yield on idle collateral and governs itself across the entire Polkadot ecosystem from a single on-chain vote.
+PolyStable is a Collateralized Debt Position (CDP) protocol built exclusively for Polkadot Hub. Users lock DOT or XCM parachain tokens as collateral to mint **pUSD**, a fully on-chain USD-pegged stablecoin. Unlike traditional CDP designs, PolyStable leverages Polkadot-native primitives — including the staking precompile, XCM execution, and parachain composability — to create a stablecoin system that earns yield on idle collateral and governs itself across the entire Polkadot ecosystem from a single on-chain vote.
 
 The protocol's stability model is backed by three interlocking mechanisms: over-collateralization enforced by the VaultEngine, a Surplus Buffer that accumulates staking rewards and stability fees as a reserve layer, and a keeper network that maintains system health by liquidating undercollateralized vaults with a 5% bonus incentive. Governance is handled by pGOV token holders via an OpenZeppelin Governor + 48-hour Timelock, with a novel XCMExecutor that allows a single Hub proposal to propagate parameter changes across all registered parachains.
 
@@ -72,17 +72,15 @@ Governor → XCMExecutor → XCMPrecompile → Parachains
 
 | Contract | Address |
 |----------|---------|
-| PGOV | `0x0000000000000000000000000000000000000000` |
-| PUSD | `0x0000000000000000000000000000000000000000` |
-| PriceOracle | `0x0000000000000000000000000000000000000000` |
-| SurplusBuffer | `0x0000000000000000000000000000000000000000` |
-| PolyStableTimelock | `0x0000000000000000000000000000000000000000` |
-| VaultEngine | `0x0000000000000000000000000000000000000000` |
-| LiquidationEngine | `0x0000000000000000000000000000000000000000` |
-| XCMExecutor | `0x0000000000000000000000000000000000000000` |
-| PolyStableGovernor | `0x0000000000000000000000000000000000000000` |
-
-*Addresses will be updated after testnet deployment.*
+| PGOV | `0x1f8365aC24FC5210656664CAb2d078aCF1B9fA96` |
+| PUSD | `0x96d1390413219651d40137F6a002584D87f5542b` |
+| PriceOracle | `0xA9A89477aA43F608fccc490D00E7DA1e140e87A5` |
+| SurplusBuffer | `0xfb6aeE36cFb805e919777a173D93b38bC35cD11C` |
+| PolyStableTimelock | `0x5C2D404dC30d3B8b4f6938b5C83118116daBE8bc` |
+| VaultEngine | `0x103C20F2Dea7BBcAdE02D1902Bd40124DB7240fF` |
+| LiquidationEngine | `0x28ec6B6EE92c15Eef30A9d5C23fB6897C5659ca5` |
+| XCMExecutor | `0x1837466D98c1af4ceC8952aEe577d65626F2F891` |
+| PolyStableGovernor | `0x0108f49C8D821930e00a2423e329079F973D1c2a` |
 
 ## Local Development
 
@@ -151,11 +149,11 @@ npm run start
 ## How to Get Testnet DOT
 
 1. Visit the [Polkadot Faucet](https://faucet.polkadot.io/)
-2. Connect your wallet to Polkadot Hub Testnet (chainId: 420420421)
+2. Connect your wallet to Polkadot Hub Testnet (chainId: 420420417)
 3. Request testnet DOT tokens
 
 Alternatively, use the Polkadot Hub testnet faucet:
-- RPC: `https://testnet-passet-hub-eth-rpc.polkadot.io`
+- RPC: `https://services.polkadothub-rpc.com/testnet`
 - Block Explorer: `https://blockscout-passet-hub.parity-testnet.parity.io`
 
 ## Roadmap
@@ -188,10 +186,6 @@ Alternatively, use the Polkadot Hub testnet faucet:
 
 PolyStable aims to become Polkadot's canonical stablecoin layer — the trust-minimized, natively cross-chain dollar that flows seamlessly between Acala, Moonbeam, Hydration, and all future parachains without bridges, intermediaries, or wrapped tokens. By building on Polkadot Hub's shared security and XCM messaging, every pUSD minted is backed by the collective economic security of the Polkadot relay chain, making it structurally more resilient than any single-chain CDP. The protocol's governance token, pGOV, represents not just voting rights over risk parameters, but ownership of the settlement layer for the next generation of Polkadot DeFi.
 
-## Team
-
-- **Discord**: Unverified — apply for Polkadot On-Chain Identity verification post-hackathon
-- **Discord server**: [https://discord.gg/WWgzkDfPQF](https://discord.gg/WWgzkDfPQF)
 - **GitHub**: [https://github.com/UncleTom29/PolyStable](https://github.com/UncleTom29/PolyStable)
 
 ## License

@@ -1,0 +1,17 @@
+{
+  "network": "polkadotHubTestnet",
+  "chainId": "420420417",
+  "deployer": "0x9f2EdCE3a34e42eaf8f965d4E14aDDd12Cf865f4",
+  "timestamp": "2026-03-20T00:20:12.405Z",
+  "contracts": {
+    "PGOV": "0x1f8365aC24FC5210656664CAb2d078aCF1B9fA96",
+    "PUSD": "0x96d1390413219651d40137F6a002584D87f5542b",
+    "PriceOracle": "0xA9A89477aA43F608fccc490D00E7DA1e140e87A5",
+    "SurplusBuffer": "0xfb6aeE36cFb805e919777a173D93b38bC35cD11C",
+    "PolyStableTimelock": "0x5C2D404dC30d3B8b4f6938b5C83118116daBE8bc",
+    "VaultEngine": "0x103C20F2Dea7BBcAdE02D1902Bd40124DB7240fF",
+    "LiquidationEngine": "0x28ec6B6EE92c15Eef30A9d5C23fB6897C5659ca5",
+    "XCMExecutor": "0x1837466D98c1af4ceC8952aEe577d65626F2F891",
+    "PolyStableGovernor": "0x0108f49C8D821930e00a2423e329079F973D1c2a"
+  }
+}

@@ -2,6 +2,97 @@ import { ethers } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 
+const COINGECKO_DOT_PRICE_URL =
+  "https://api.coingecko.com/api/v3/simple/price?ids=polkadot&vs_currencies=usd";
+
+async function fetchDotPriceUsd(): Promise<number> {
+  const response = await fetch(COINGECKO_DOT_PRICE_URL, {
+    headers: {
+      accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`CoinGecko price fetch failed with status ${response.status}`);
+  }
+
+  const data = (await response.json()) as { polkadot?: { usd?: number } };
+  const price = data.polkadot?.usd;
+
+  if (!price || !Number.isFinite(price) || price <= 0) {
+    throw new Error("CoinGecko returned an invalid DOT/USD price");
+  }
+
+  return price;
+}
+
+function formatRatioPercent(ratio: bigint): string {
+  if (ratio === ethers.MaxUint256) {
+    return "UNPRICED";
+  }
+
+  return `${(Number(ethers.formatEther(ratio)) * 100).toFixed(1)}%`;
+}
+
+async function openVaultBatch(
+  vaultEngine: Awaited<ReturnType<typeof ethers.getContractAt>>,
+  collateralAddress: string,
+  collateralLabel: string,
+  dotPrice18: bigint,
+  vaultParams: Array<{ label: string; collateralDOT: string; targetRatio: number }>,
+  useNativeValue: boolean
+): Promise<bigint[]> {
+  const vaultIds: bigint[] = [];
+
+  for (const { label, collateralDOT, targetRatio } of vaultParams) {
+    const deposit = ethers.parseEther(collateralDOT);
+    const mintAmount =
+      (deposit * dotPrice18 * 100n) / BigInt(targetRatio) / 10n ** 18n;
+
+    try {
+      const tx = await vaultEngine["openVault(address,uint256,uint256)"](
+        collateralAddress,
+        deposit,
+        mintAmount,
+        {
+          value: useNativeValue ? deposit : 0n,
+          gasLimit: 2_500_000,
+        }
+      );
+      const receipt = await tx.wait();
+
+      const event = receipt?.logs.find((log: { topics: string[] }) => {
+        try {
+          const parsed = vaultEngine.interface.parseLog(
+            log as { topics: string[]; data: string }
+          );
+          return parsed?.name === "VaultOpened";
+        } catch {
+          return false;
+        }
+      });
+
+      const vaultId = event
+        ? (vaultEngine.interface.parseLog(
+            event as { topics: string[]; data: string }
+          )?.args[0] as bigint)
+        : BigInt(vaultIds.length);
+      vaultIds.push(vaultId);
+
+      const ratio = await vaultEngine.getCollateralRatio(vaultId);
+      console.log(
+        `  Vault ${vaultId}: ${label} ratio | deposit=${collateralDOT} ${collateralLabel} | mint=${ethers.formatEther(
+          mintAmount
+        )} pUSD | actual ratio=${formatRatioPercent(ratio)}`
+      );
+    } catch (err) {
+      console.error(`  Failed to open vault for ${label}:`, err);
+    }
+  }
+
+  return vaultIds;
+}
+
 async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Seeding testnet with account:", deployer.address);
@@ -14,12 +105,31 @@ async function main() {
   const { contracts } = JSON.parse(fs.readFileSync(deploymentsPath, "utf8"));
 
   const vaultEngine = await ethers.getContractAt("VaultEngine", contracts.VaultEngine);
-  const pusd = await ethers.getContractAt("PUSD", contracts.PUSD);
-  const pgov = await ethers.getContractAt("PGOV", contracts.PGOV);
+  const oracle = await ethers.getContractAt("PriceOracle", contracts.PriceOracle);
   const governor = await ethers.getContractAt("PolyStableGovernor", contracts.PolyStableGovernor);
 
-  // DOT price (for ratio calculations): assume $10
-  const DOT_PRICE = 10n;
+  const dotPriceUsd = await fetchDotPriceUsd();
+  const dotPrice8 = ethers.parseUnits(dotPriceUsd.toFixed(8), 8);
+  console.log(`Current DOT price from CoinGecko: $${dotPriceUsd.toFixed(4)}`);
+
+  console.log("\nRegistering testnet DOT/USD feed...");
+  const MockAggregatorFactory = await ethers.getContractFactory("MockChainlinkAggregator");
+  const dotFeed = await MockAggregatorFactory.deploy(
+    dotPrice8,
+    8,
+    "DOT / USD"
+  );
+  await dotFeed.waitForDeployment();
+  const dotFeedAddress = await dotFeed.getAddress();
+
+  await (await oracle.registerFeed(ethers.ZeroAddress, dotFeedAddress)).wait();
+  console.log(`  Registered mock DOT/USD feed at ${dotFeedAddress}`);
+
+  await (await oracle.getPrice(ethers.ZeroAddress, { gasLimit: 500_000 })).wait();
+  const [dotPrice18] = await oracle.getPrice.staticCall(ethers.ZeroAddress);
+  console.log(
+    `  Cached oracle DOT price: $${Number(ethers.formatUnits(dotPrice18, 18)).toFixed(4)}`
+  );
 
   // Target ratios and their corresponding vault params (collateral DOT, mint pUSD)
   // ratio = (locked * price) / debt  =>  debt = (locked * price) / ratio
@@ -32,41 +142,63 @@ async function main() {
   ];
 
   console.log("\nOpening 5 vaults...");
-  const vaultIds: bigint[] = [];
+  let vaultIds = await openVaultBatch(
+    vaultEngine,
+    ethers.ZeroAddress,
+    "DOT",
+    dotPrice18,
+    vaultParams,
+    true
+  );
 
-  for (const { label, collateralDOT, targetRatio } of vaultParams) {
-    const deposit = ethers.parseEther(collateralDOT);
-    // debt = deposit * DOT_PRICE * 100 / targetRatio  (in ether units)
-    const mintAmount = (deposit * DOT_PRICE * 100n) / BigInt(targetRatio);
+  if (vaultIds.length === 0) {
+    console.log(
+      "\nNative DOT vaults failed on this testnet. Falling back to a mock ERC20 collateral so seeding can still create sample positions."
+    );
 
-    try {
-      const tx = await vaultEngine.openVault(
-        ethers.ZeroAddress,
-        deposit,
-        mintAmount,
-        { value: deposit }
-      );
-      const receipt = await tx.wait();
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    const mockCollateral = await MockERC20Factory.deploy(
+      "Mock DOT",
+      "mDOT",
+      18
+    );
+    await mockCollateral.waitForDeployment();
+    const mockCollateralAddress = await mockCollateral.getAddress();
 
-      // Get vault ID from event
-      const event = receipt?.logs.find((log: { topics: string[] }) => {
-        try {
-          const parsed = vaultEngine.interface.parseLog(log as { topics: string[]; data: string });
-          return parsed?.name === "VaultOpened";
-        } catch {
-          return false;
-        }
-      });
-      const vaultId = event
-        ? (vaultEngine.interface.parseLog(event as { topics: string[]; data: string })?.args[0] as bigint)
-        : BigInt(vaultIds.length);
-      vaultIds.push(vaultId);
+    await (await mockCollateral.mint(deployer.address, ethers.parseEther("500"))).wait();
+    await (await oracle.registerFeed(mockCollateralAddress, dotFeedAddress)).wait();
+    await (await oracle.getPrice(mockCollateralAddress, { gasLimit: 500_000 })).wait();
+    await (
+      await vaultEngine.addCollateral(
+        mockCollateralAddress,
+        ethers.parseEther("1.5"),
+        ethers.parseUnits("1.05", 27),
+        ethers.parseEther("0.05"),
+        10_000_000n * 10n ** 18n
+      )
+    ).wait();
+    await (
+      await mockCollateral.approve(
+        contracts.VaultEngine,
+        ethers.MaxUint256
+      )
+    ).wait();
 
-      const ratio = await vaultEngine.getCollateralRatio(vaultId);
-      console.log(`  Vault ${vaultId}: ${label} ratio | deposit=${collateralDOT} DOT | mint=${ethers.formatEther(mintAmount)} pUSD | actual ratio=${ethers.formatEther(ratio) + "x" }`);
-    } catch (err) {
-      console.error(`  Failed to open vault for ${label}:`, err);
-    }
+    const [mockPrice18] = await oracle.getPrice.staticCall(mockCollateralAddress);
+    console.log(
+      `  Mock collateral deployed to ${mockCollateralAddress} with cached price $${Number(
+        ethers.formatUnits(mockPrice18, 18)
+      ).toFixed(4)}`
+    );
+
+    vaultIds = await openVaultBatch(
+      vaultEngine,
+      mockCollateralAddress,
+      "mDOT",
+      dotPrice18,
+      vaultParams,
+      false
+    );
   }
 
   // ─── Create governance proposal ───────────────────────────────────────────
@@ -84,20 +216,33 @@ async function main() {
   ]);
 
   const proposalDescription = "Increase DOT debt ceiling to 20M pUSD";
+  const proposalRunDescription = `${proposalDescription} [seed ${new Date().toISOString()}]`;
 
   try {
     const proposeTx = await governor.propose(
       [contracts.VaultEngine],
       [0],
       [updateCalldata],
-      proposalDescription
+      proposalRunDescription
     );
     const receipt = await proposeTx.wait();
-    const proposalId = receipt?.logs[0]
-      ? BigInt(receipt.logs[0].topics[1] ?? 0)
+    const proposalEvent = receipt?.logs.find((log: { topics: string[] }) => {
+      try {
+        const parsed = governor.interface.parseLog(
+          log as { topics: string[]; data: string }
+        );
+        return parsed?.name === "ProposalCreated";
+      } catch {
+        return false;
+      }
+    });
+    const proposalId = proposalEvent
+      ? (governor.interface.parseLog(
+          proposalEvent as { topics: string[]; data: string }
+        )?.args[0] as bigint)
       : 0n;
     console.log(`  Proposal created. ID: ${proposalId}`);
-    console.log(`  Description: "${proposalDescription}"`);
+    console.log(`  Description: "${proposalRunDescription}"`);
   } catch (err) {
     console.error("  Failed to create proposal:", err);
   }
@@ -113,11 +258,12 @@ async function main() {
     try {
       const vault = await vaultEngine.getVault(vaultId);
       const ratio = await vaultEngine.getCollateralRatio(vaultId);
-      const ratioPercent = Number(ethers.formatEther(ratio)) * 100;
+      const ratioPercent =
+        ratio === ethers.MaxUint256 ? Number.POSITIVE_INFINITY : Number(ethers.formatEther(ratio)) * 100;
       const health = ratioPercent >= 175 ? "SAFE  " : ratioPercent >= 150 ? "WARN  " : "DANGER";
       const collateral = ethers.formatEther(vault.lockedAmount).padEnd(14);
       const debt = ethers.formatEther(vault.debt).padEnd(13);
-      const ratioStr = ratioPercent.toFixed(1).padEnd(12);
+      const ratioStr = formatRatioPercent(ratio).padEnd(12);
       console.log(`║ ${vaultId}     ║ ${collateral} ║ ${debt} ║ ${ratioStr} ║ ${health} ║`);
     } catch (err) {
       console.log(`║ ${vaultId}     ║ ERROR                                                   ║`);

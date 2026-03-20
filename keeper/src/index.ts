@@ -4,7 +4,7 @@ import { Liquidator } from "./liquidator";
 import { StakingRewardsHarvester } from "./stakingRewardsHarvester";
 import { PriceMonitor } from "./priceMonitor";
 
-const RPC_URL = process.env.RPC_URL ?? "https://testnet-passet-hub-eth-rpc.polkadot.io";
+const RPC_URL = process.env.RPC_URL ?? "https://services.polkadothub-rpc.com/testnet";
 const KEEPER_PRIVATE_KEY = process.env.KEEPER_PRIVATE_KEY;
 
 if (!KEEPER_PRIVATE_KEY) {
@@ -17,6 +17,7 @@ const VAULT_ENGINE = process.env.VAULT_ENGINE_ADDRESS ?? "";
 const LIQUIDATION_ENGINE = process.env.LIQUIDATION_ENGINE_ADDRESS ?? "";
 const PUSD = process.env.PUSD_ADDRESS ?? "";
 const SURPLUS_BUFFER = process.env.SURPLUS_BUFFER_ADDRESS ?? "";
+const PRICE_ORACLE = process.env.PRICE_ORACLE_ADDRESS ?? "";
 
 if (!VAULT_ENGINE || !LIQUIDATION_ENGINE || !PUSD || !SURPLUS_BUFFER) {
   console.error(
@@ -51,14 +52,18 @@ async function main(): Promise<void> {
 
   const liquidator = new Liquidator(wallet, VAULT_ENGINE, LIQUIDATION_ENGINE, PUSD);
   const harvester = new StakingRewardsHarvester(wallet, VAULT_ENGINE, SURPLUS_BUFFER);
-  const priceMonitor = new PriceMonitor(wallet, VAULT_ENGINE);
+  const priceMonitor = new PriceMonitor(wallet, VAULT_ENGINE, PRICE_ORACLE || undefined);
 
   console.log("\n✅ Connected. Starting main loop (60s interval)...\n");
 
   const loop = async (): Promise<void> => {
     try {
       // 1. Check price feeds
-      await priceMonitor.checkAllFeeds();
+      const prices = await priceMonitor.checkAllFeeds();
+      const dotPrice = prices[ethers.ZeroAddress.toLowerCase()];
+      if (dotPrice !== undefined) {
+        liquidator.setDotPriceUSD(dotPrice);
+      }
 
       // 2. Scan and liquidate underwater vaults
       const result = await liquidator.scanAndLiquidate();

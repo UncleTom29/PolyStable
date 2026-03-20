@@ -29,8 +29,7 @@ export class Liquidator {
   private pusd: ethers.Contract;
   private signer: ethers.Wallet;
 
-  // Approximate DOT price in USD (should use PriceMonitor in production)
-  private dotPriceUSD = 10;
+  private dotPriceUSD: number | null = null;
   // Liquidation bonus: 5%
   private LIQUIDATION_BONUS = 0.05;
 
@@ -55,6 +54,12 @@ export class Liquidator {
     this.vaultEngine = this.vaultEngine.connect(signer) as ethers.Contract;
     this.liquidationEngine = this.liquidationEngine.connect(signer) as ethers.Contract;
     this.pusd = this.pusd.connect(signer) as ethers.Contract;
+  }
+
+  setDotPriceUSD(priceUsd: number): void {
+    if (Number.isFinite(priceUsd) && priceUsd > 0) {
+      this.dotPriceUSD = priceUsd;
+    }
   }
 
   async scanAndLiquidate(): Promise<LiquidationResult> {
@@ -102,16 +107,22 @@ export class Liquidator {
         const receipt = await liquidateTx.wait();
 
         const seizedDOT = vault.lockedAmount as bigint;
-        const debtUSD = (Number(debt) / 1e18) * 1; // pUSD = $1
-        const seizedUSD = (Number(seizedDOT) / 1e18) * this.dotPriceUSD;
+        const collateralLabel =
+          vault.collateral === ethers.ZeroAddress
+            ? "DOT"
+            : `${String(vault.collateral).slice(0, 6)}…`;
+        const seizedUSD =
+          this.dotPriceUSD === null ? 0 : (Number(seizedDOT) / 1e18) * this.dotPriceUSD;
         // Profit = bonus portion of seized collateral (5% of seized value)
         const profit = seizedUSD * this.LIQUIDATION_BONUS;
+        const profitLabel =
+          this.dotPriceUSD === null ? "n/a (price unavailable)" : `$${profit.toFixed(2)}`;
 
         result.liquidated++;
         result.totalProfitUSD += profit;
 
         console.log(
-          `[Liquidator] ✅ Liquidated vault ${vaultId} | Debt: ${ethers.formatEther(debt)} pUSD | Seized: ${ethers.formatEther(seizedDOT)} DOT | Est. profit: $${profit.toFixed(2)} | Tx: ${receipt?.hash}`
+          `[Liquidator] ✅ Liquidated vault ${vaultId} | Debt: ${ethers.formatEther(debt)} pUSD | Seized: ${ethers.formatEther(seizedDOT)} ${collateralLabel} | Est. profit: ${profitLabel} | Tx: ${receipt?.hash}`
         );
       } catch (err) {
         console.error(`[Liquidator] ❌ Failed to liquidate vault ${vaultId}:`, err);

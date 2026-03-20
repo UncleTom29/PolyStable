@@ -22,6 +22,8 @@ export class StakingRewardsHarvester {
   private surplusBuffer: ethers.Contract;
   private signer: ethers.Wallet;
   private vaultEngineAddress: string;
+  private stakingReadSupported: boolean | null = null;
+  private hasLoggedUnsupportedPrecompile = false;
 
   constructor(
     signer: ethers.Wallet,
@@ -40,12 +42,35 @@ export class StakingRewardsHarvester {
     this.vaultEngine = this.vaultEngine.connect(signer) as ethers.Contract;
     this.staking = this.staking.connect(signer.provider!) as ethers.Contract;
     this.surplusBuffer = this.surplusBuffer.connect(signer.provider!) as ethers.Contract;
+    this.stakingReadSupported = null;
+    this.hasLoggedUnsupportedPrecompile = false;
   }
 
   async harvest(): Promise<void> {
     try {
+      if (this.stakingReadSupported === false) {
+        return;
+      }
+
       // Check pending rewards for the VaultEngine address
-      const pendingRewards: bigint = await this.staking.getPendingRewards(this.vaultEngineAddress);
+      let pendingRewards: bigint;
+      try {
+        pendingRewards = await this.staking.getPendingRewards(this.vaultEngineAddress);
+        this.stakingReadSupported = true;
+      } catch (err) {
+        if (this.isUnsupportedReadError(err)) {
+          this.stakingReadSupported = false;
+          if (!this.hasLoggedUnsupportedPrecompile) {
+            console.warn(
+              "[Harvester] Staking rewards precompile read is not supported on this network, disabling harvest checks"
+            );
+            this.hasLoggedUnsupportedPrecompile = true;
+          }
+          return;
+        }
+
+        throw err;
+      }
 
       if (pendingRewards < MIN_HARVEST_THRESHOLD) {
         console.log(
@@ -68,5 +93,23 @@ export class StakingRewardsHarvester {
     } catch (err) {
       console.error("[Harvester] ❌ Harvest failed:", err);
     }
+  }
+
+  private isUnsupportedReadError(err: unknown): boolean {
+    if (!(err instanceof Error)) {
+      return false;
+    }
+
+    const maybeError = err as Error & {
+      code?: string;
+      value?: string;
+      shortMessage?: string;
+    };
+
+    return (
+      maybeError.code === "BAD_DATA" ||
+      maybeError.value === "0x" ||
+      maybeError.shortMessage?.includes("could not decode result data") === true
+    );
   }
 }

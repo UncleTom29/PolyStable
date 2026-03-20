@@ -5,17 +5,17 @@ const VAULT_ENGINE_ABI = [
 ];
 
 const PRICE_ORACLE_ABI = [
-  "function getPrice(address collateral) view returns (uint256 price18dec, uint8 decimals)",
-  "function lastUpdate(address collateral) view returns (uint256)",
+  "function getPrice(address collateral) returns (uint256 price18dec, uint8 decimals)",
+  "function lastCachedPrice(address collateral) view returns (uint256)",
+  "function priceFeeds(address collateral) view returns (address feed, uint8 decimals)",
 ];
-
-// Alert if price not updated in > 1 hour
-const STALE_PRICE_THRESHOLD_S = 3600;
 
 export class PriceMonitor {
   private vaultEngine: ethers.Contract;
   private oracle: ethers.Contract | null = null;
   private signer: ethers.Wallet;
+  private latestPrices = new Map<string, number>();
+  private hasWarnedMissingOracle = false;
 
   // Tracked collateral addresses
   private trackedCollaterals: string[] = [
@@ -38,42 +38,52 @@ export class PriceMonitor {
     }
   }
 
-  async checkAllFeeds(): Promise<void> {
+  async checkAllFeeds(): Promise<Record<string, number>> {
+    const prices: Record<string, number> = {};
+
     for (const collateral of this.trackedCollaterals) {
-      await this.checkFeed(collateral);
+      const usd = await this.checkFeed(collateral);
+      if (usd !== null) {
+        prices[collateral.toLowerCase()] = usd;
+        this.latestPrices.set(collateral.toLowerCase(), usd);
+      }
     }
+
+    return prices;
   }
 
-  private async checkFeed(collateral: string): Promise<void> {
+  getLatestPrice(collateral: string): number | null {
+    return this.latestPrices.get(collateral.toLowerCase()) ?? null;
+  }
+
+  private async checkFeed(collateral: string): Promise<number | null> {
     try {
       const label = collateral === ethers.ZeroAddress ? "DOT" : collateral.slice(0, 8) + "…";
 
-      if (this.oracle) {
-        // Check via PriceOracle contract
-        try {
-          const lastUpdate: bigint = await this.oracle.lastUpdate(collateral);
-          const now = BigInt(Math.floor(Date.now() / 1000));
-          const age = now - lastUpdate;
-
-          if (age > BigInt(STALE_PRICE_THRESHOLD_S)) {
-            console.warn(
-              `[PriceMonitor] ⚠ STALE PRICE: ${label} not updated for ${age}s (threshold: ${STALE_PRICE_THRESHOLD_S}s)`
-            );
-          } else {
-            const [price] = await this.oracle.getPrice(collateral);
-            console.log(
-              `[PriceMonitor] ${label}: $${(Number(price) / 1e18).toFixed(4)} (updated ${age}s ago)`
-            );
-          }
-        } catch {
-          console.warn(`[PriceMonitor] ⚠ Could not read price for ${label}`);
+      if (!this.oracle) {
+        if (!this.hasWarnedMissingOracle) {
+          console.warn("[PriceMonitor] Oracle address not configured, skipping price checks");
+          this.hasWarnedMissingOracle = true;
         }
-      } else {
-        // Fallback: just log that we checked (oracle address not set)
-        console.log(`[PriceMonitor] ${label}: Oracle not configured, skipping price check`);
+        return null;
       }
+
+      const [feed] = await this.oracle.priceFeeds(collateral);
+      if (feed === ethers.ZeroAddress) {
+        console.warn(`[PriceMonitor] ${label}: feed not registered in oracle`);
+        return null;
+      }
+
+      const [price] = await this.oracle.getPrice.staticCall(collateral);
+      const cachedPrice: bigint = await this.oracle.lastCachedPrice(collateral);
+      const priceUsd = Number(ethers.formatUnits(price, 18));
+      const cacheState = cachedPrice > 0n ? "cached" : "uncached";
+
+      console.log(`[PriceMonitor] ${label}: $${priceUsd.toFixed(4)} (${cacheState})`);
+      return priceUsd;
     } catch (err) {
       console.error(`[PriceMonitor] ❌ Error checking feed for ${collateral}:`, err);
+      return null;
     }
   }
 }
